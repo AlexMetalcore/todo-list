@@ -36,6 +36,7 @@ func init() {
 func index(w http.ResponseWriter, r *http.Request) {
 
     var count int
+    var limit int
     countPosts, err := database.Prepare("SELECT COUNT(*) as count FROM " + dbName + ".posts")
 
     if (err != nil) {
@@ -84,12 +85,7 @@ func index(w http.ResponseWriter, r *http.Request) {
     }
 
     current, err := strconv.Atoi(r.FormValue("page"))
-    if (err != nil) {
-        fmt.Println(err)
-    }
-
-    //pager := pagination.New(count, limit, current, "/")
-    pager := pagination.New(count, 1, current, "/")
+    pager := pagination.New(count, limit, current, "/")
 
     data := struct {
         Posts []Post
@@ -206,17 +202,21 @@ func main() {
 
 	username := os.Getenv("db_user")
 	password := os.Getenv("db_pass")
-	dbName := os.Getenv("db_name")
-	dbHost := os.Getenv("db_host")
-	dbPort := os.Getenv("db_port")
+	db_name := os.Getenv("db_name")
+	db_host := os.Getenv("db_host")
+	db_port := os.Getenv("db_port")
 
-    db, err := sql.Open("mysql", "" + username + ":" + password + "@tcp(" + dbHost + ":" + dbPort + ")/" + dbName + "")
+    db, err := sql.Open("mysql", "" + username + ":" + password + "@tcp(" + db_host + ":" + db_port + ")/" + db_name + "")
 
     if (err != nil) {
         fmt.Println(err)
     }
 
+    /*
+    * Set variable to global
+    */
     database = db
+    dbName = db_name
     defer db.Close()
 
 	mux := mux.NewRouter()
@@ -227,7 +227,7 @@ func main() {
     mux.HandleFunc("/editPost", editPost)
     mux.HandleFunc("/deletePost", deletePost)
     mux.HandleFunc("/userData", userData)
-    port := ":8080"
+    port := ":8089"
     fmt.Println("Listening on port ", port)
     http.ListenAndServe(port, mux)
 }
