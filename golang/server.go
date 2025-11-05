@@ -57,22 +57,6 @@ func index(w http.ResponseWriter, r *http.Request) {
         fmt.Println(err)
     }
 
-    /* page := "1"
-    if (r.FormValue("page") != "") {
-        page = r.FormValue("page")
-    }
-
-    pagePrepare, err := strconv.Atoi(page)
-
-    if (err != nil) {
-        fmt.Println(err)
-    }
-
-    limit := 3
-    offset := limit * (pagePrepare - 1)
-
-    rows, err := database.Query("SELECT * FROM " + dbName + ".posts ORDER BY id DESC LIMIT " + strconv.Itoa(offset) + ", " + strconv.Itoa(limit) + "") */
-
     rows, err := database.Query("SELECT * FROM " + dbName + ".posts")
 
     if (err != nil) {
@@ -258,19 +242,19 @@ func main() {
     defer db.Close()
     
     brokers := os.Getenv("KAFKA_BROKERS")
-        kafkaTopic = os.Getenv("KAFKA_TOPIC")
-        if kafkaTopic == "" {
-            kafkaTopic = "posts.created"
+    kafkaTopic = os.Getenv("KAFKA_TOPIC")
+    if kafkaTopic == "" {
+        kafkaTopic = "posts.created"
+    }
+   if strings.TrimSpace(brokers) != "" {
+        kafkaWriter = &kafka.Writer{
+            Addr:         kafka.TCP(strings.Split(brokers, ",")...),
+            Topic:        kafkaTopic,
+            Balancer:     &kafka.Hash{},
+            RequiredAcks: kafka.RequireAll,
         }
-        if strings.TrimSpace(brokers) != "" {
-            kafkaWriter = &kafka.Writer{
-                Addr:         kafka.TCP(strings.Split(brokers, ",")...),
-                Topic:        kafkaTopic,
-                Balancer:     &kafka.Hash{},
-                RequiredAcks: kafka.RequireAll,
-            }
-            defer kafkaWriter.Close()
-        }
+        defer kafkaWriter.Close()
+    }
 
 	mux := mux.NewRouter()
 	router := mux.StrictSlash(true)
