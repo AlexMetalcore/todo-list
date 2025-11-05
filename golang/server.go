@@ -12,12 +12,20 @@ import (
     "github.com/thedevsaddam/renderer"
     _ "github.com/go-sql-driver/mysql"
     "github.com/AndyEverLie/go-pagination-bootstrap"
+    "strings"
+    "time"
+    "context"
+    "encoding/json"
+    "github.com/segmentio/kafka-go"
 )
 
 var rnd *renderer.Render
 var database *sql.DB
 var dbName string
 var errorEmail string
+
+var kafkaWriter *kafka.Writer
+var kafkaTopic string
 
 type Post struct {
     Id  string
@@ -180,17 +188,47 @@ func userData(w http.ResponseWriter, r *http.Request) {
             if m, _ := regexp.MatchString(`^([\w\.\_]{2,10})@(\w{1,}).([a-z]{2,4})$`, email); !m {
                 errorEmail = "Не верный формат e-mail " + email
             } else {
-                _, err := database.Exec("INSERT INTO " + dbName + ".posts (username, email, content) VALUES (?, ?, ?)",
+                res, err := database.Exec("INSERT INTO " + dbName + ".posts (username, email, content) VALUES (?, ?, ?)",
                 username, email, content)
                 errorEmail = ""
                 if (err != nil) {
                     fmt.Println(err)
                 }
+                newID, _ := res.LastInsertId()
+                publishPostCreated(newID, username, email, content)
             }
         }
 
         http.Redirect(w, r, "/", 301)
     }
+}
+
+func publishPostCreated(id int64, username, email, content string) {
+    if kafkaWriter == nil {
+        fmt.Println("Kafka does not configure")
+    }
+
+    evt := map[string]interface{}{
+        "event":       "post.created",
+        "version":     1,
+        "occurred_at": time.Now().UTC().Format(time.RFC3339Nano),
+        "id":          id,
+        "payload": map[string]string{
+            "username": username,
+            "email":    email,
+            "content":  content,
+        },
+    }
+
+    body, _ := json.Marshal(evt)
+
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    _ = kafkaWriter.WriteMessages(ctx, kafka.Message{
+        Key:   []byte(strconv.FormatInt(id, 10)),
+        Value: body,
+    })
 }
 
 func main() {
@@ -200,11 +238,11 @@ func main() {
 		fmt.Print(e)
 	}
 
-	username := os.Getenv("db_user")
-	password := os.Getenv("db_pass")
-	db_name := os.Getenv("db_name")
-	db_host := os.Getenv("db_host")
-	db_port := os.Getenv("db_port")
+	username := os.Getenv("DB_USER")
+	password := os.Getenv("DB_PASS")
+	db_name := os.Getenv("DB_NAME")
+	db_host := os.Getenv("DB_HOST")
+	db_port := os.Getenv("DB_PORT")
 
     db, err := sql.Open("mysql", "" + username + ":" + password + "@tcp(" + db_host + ":" + db_port + ")/" + db_name + "")
 
@@ -218,6 +256,21 @@ func main() {
     database = db
     dbName = db_name
     defer db.Close()
+    
+    brokers := os.Getenv("KAFKA_BROKERS")
+        kafkaTopic = os.Getenv("KAFKA_TOPIC")
+        if kafkaTopic == "" {
+            kafkaTopic = "posts.created"
+        }
+        if strings.TrimSpace(brokers) != "" {
+            kafkaWriter = &kafka.Writer{
+                Addr:         kafka.TCP(strings.Split(brokers, ",")...),
+                Topic:        kafkaTopic,
+                Balancer:     &kafka.Hash{},
+                RequiredAcks: kafka.RequireAll,
+            }
+            defer kafkaWriter.Close()
+        }
 
 	mux := mux.NewRouter()
 	router := mux.StrictSlash(true)

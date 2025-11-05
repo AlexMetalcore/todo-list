@@ -1,0 +1,19 @@
+{
+    "name": "heavenshalburn/php",
+    "autoload": {
+        "psr-4": {
+            "Heavenshalburn\\Php\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "heavenshalburn",
+            "email": "heavenshalburn@syneforge.com"
+        }
+    ],
+    "require": {
+        "kwn/php-rdkafka-stubs": "^2.2",
+        "ext-rdkafka": "*",
+        "ext-pdo_pgsql": "*"
+    }
+}
