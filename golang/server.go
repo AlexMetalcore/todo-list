@@ -49,19 +49,19 @@ func index(w http.ResponseWriter, r *http.Request) {
     var limit int
     countPosts, err := database.Prepare("select count(*) as count from " + dbName + ".posts")
 
-    if (err != nil) {
+    if err != nil {
        fmt.Println(err)
     }
 
     err = countPosts.QueryRow().Scan(&count)
 
-    if (err != nil) {
+    if err != nil {
         fmt.Println(err)
     }
 
     rows, err := database.Query("select * from " + dbName + ".posts")
 
-    if (err != nil) {
+    if err != nil {
         fmt.Println(err)
     }
 
@@ -251,9 +251,11 @@ func publishPostCreated(id int64, username, email, content string) {
 func createKafkaWriter() *kafka.Writer {
     brokers := os.Getenv("KAFKA_BROKERS")
     kafkaTopic = os.Getenv("KAFKA_TOPIC")
+
     if kafkaTopic == "" {
         kafkaTopic = "posts.created"
     }
+
     if strings.TrimSpace(brokers) == "" {
         return nil
     }
@@ -269,7 +271,7 @@ func createKafkaWriter() *kafka.Writer {
 func main() {
     e := godotenv.Load()
 
-	if (e != nil) {
+	if e != nil {
 		fmt.Print(e)
 	}
 
@@ -289,6 +291,7 @@ func main() {
     defer db.Close()
     
     kafkaWriter = createKafkaWriter()
+
     if kafkaWriter != nil {
        defer kafkaWriter.Close()
     }
