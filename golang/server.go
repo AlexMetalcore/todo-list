@@ -19,9 +19,12 @@ import (
     "github.com/segmentio/kafka-go"
 )
 
-var rnd *renderer.Render
+var render *renderer.Render
+
 var database *sql.DB
 var dbName string
+var dbHost string
+var dbPort string
 var errorEmail string
 
 var kafkaWriter *kafka.Writer
@@ -38,14 +41,13 @@ func init() {
 	opts := renderer.Options {
 		ParseGlobPattern: "./public/*.html",
 	}
-	rnd = renderer.New(opts)
+	render = renderer.New(opts)
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
-
     var count int
     var limit int
-    countPosts, err := database.Prepare("SELECT COUNT(*) as count FROM " + dbName + ".posts")
+    countPosts, err := database.Prepare("select count(*) as count from " + dbName + ".posts")
 
     if (err != nil) {
        fmt.Println(err)
@@ -57,7 +59,7 @@ func index(w http.ResponseWriter, r *http.Request) {
         fmt.Println(err)
     }
 
-    rows, err := database.Query("SELECT * FROM " + dbName + ".posts")
+    rows, err := database.Query("select * from " + dbName + ".posts")
 
     if (err != nil) {
         fmt.Println(err)
@@ -85,16 +87,22 @@ func index(w http.ResponseWriter, r *http.Request) {
         Email string
     } {Posts: postsData, Render: pager, Email: errorEmail}
 
-	rnd.HTML(w, http.StatusOK, "home", data)
+	render.HTML(w, http.StatusOK, "home", data)
 }
 
-func addPost(w http.ResponseWriter, r *http.Request) {
-	rnd.HTML(w, http.StatusOK, "addPost", nil)
+func add(w http.ResponseWriter, r *http.Request) {
+	render.HTML(w, http.StatusOK, "add", nil)
 }
 
-func editPost(w http.ResponseWriter, r *http.Request) {
-    id := r.FormValue("id")
-    row := database.QueryRow("SELECT * FROM " + dbName + ".posts WHERE id = ?", id)
+func edit(w http.ResponseWriter, r *http.Request) {
+    vars := mux.Vars(r)
+    id := vars["id"]
+
+    if id == "" {
+       http.NotFound(w, r)
+    }
+
+    row := database.QueryRow("select * from " + dbName + ".posts where id = ?", id)
     post := Post{}
     err := row.Scan(&post.Id, &post.Username, &post.Email, &post.Content)
 
@@ -102,37 +110,40 @@ func editPost(w http.ResponseWriter, r *http.Request) {
         Post Post
     } {Post: post}
 
-    if (err != nil) {
-        fmt.Println(err)
-        http.Error(w, http.StatusText(404), http.StatusNotFound)
+    if err != nil {
+       fmt.Println(err)
+       http.Error(w, http.StatusText(404), http.StatusNotFound)
     } else {
-        rnd.HTML(w, http.StatusOK, "editPost", data)
+       render.HTML(w, http.StatusOK, "edit", data)
     }
 }
 
-func deletePost(w http.ResponseWriter, r *http.Request) {
-    id := r.FormValue("id")
-    if (id != "") {
-        row := database.QueryRow("SELECT * FROM " + dbName + ".posts WHERE id = ?", id)
-        post := Post{}
-        err := row.Scan(&post.Id, &post.Username, &post.Email, &post.Content)
+func delete(w http.ResponseWriter, r *http.Request) {
+    vars := mux.Vars(r)
+    id := vars["id"]
 
-        if (err != nil) {
-           fmt.Println(err)
-           http.Error(w, http.StatusText(404), http.StatusNotFound)
-        }
-
-        if (post.Id != "") {
-            _, err := database.Exec("DELETE FROM " + dbName + ".posts where id = ?", id)
-            if (err != nil) {
-               http.Error(w, http.StatusText(404), http.StatusNotFound)
-            }
-            http.Redirect(w, r, "/", 301)
-        }
-    } else {
+    if id == "" {
         http.NotFound(w, r)
     }
+
+    row := database.QueryRow("select * from " + dbName + ".posts where id = ?", id)
+    post := Post{}
+    err := row.Scan(&post.Id, &post.Username, &post.Email, &post.Content)
+
+    if err != nil {
+       fmt.Println(err)
+       http.Error(w, http.StatusText(404), http.StatusNotFound)
+    }
+
+    if post.Id != "" {
+        _, err := database.Exec("delete from " + dbName + ".posts where id = ?", id)
+        if err != nil {
+           http.Error(w, http.StatusText(404), http.StatusNotFound)
+        }
+        http.Redirect(w, r, "/", 301)
+    }
 }
+
 
 func userData(w http.ResponseWriter, r *http.Request) {
     username := r.PostFormValue("username")
@@ -140,44 +151,64 @@ func userData(w http.ResponseWriter, r *http.Request) {
     content := r.PostFormValue("content")
 
     if (username == "" || email == "" || content == "") {
-        http.Redirect(w, r, "/addPost", 301)
+        http.Redirect(w, r, "/add", 301)
     } else {
-        if (r.PostFormValue("id") != "") {
+        if r.PostFormValue("id") != "" {
             id := r.PostFormValue("id")
-            row := database.QueryRow("SELECT * FROM " + dbName + ".posts WHERE id = ?", id)
+            row := database.QueryRow("select * from " + dbName + ".posts where id = ?", id)
             post := Post{}
             err := row.Scan(&post.Id, &post.Username, &post.Email, &post.Content)
 
-            if (err != nil) {
+            if err != nil {
                fmt.Println(err)
                http.Error(w, http.StatusText(404), http.StatusNotFound)
             }
 
-            if (post.Id != "") {
+            if post.Id != "" {
                 if m, _ := regexp.MatchString(`^([\w\.\_]{2,10})@(\w{1,}).([a-z]{2,4})$`, email); !m {
                      errorEmail = "Не верный формат e-mail " + email
                 } else {
                     errorEmail = ""
-                    _, err = database.Exec("UPDATE " + dbName + ".posts set username=?, email=?, content = ? where id = ?",username, email, content, post.Id)
+                    res, err := database.Exec(
+                        "update " + dbName + ".posts set username=?, email=?, content = ? where id = ?", username, email, content, post.Id,
+                    )
+
+                    if err != nil {
+                       fmt.Println(err)
+                    }
+
+                    updateID, _ := res.LastInsertId()
+                    publishPostCreated(updateID, username, email, content)
                 }
             } else {
                 if m, _ := regexp.MatchString(`^([\w\.\_]{2,10})@(\w{1,}).([a-z]{2,4})$`, email); !m {
                    errorEmail = "Не верный формат e-mail " + email
                 } else {
                     errorEmail = ""
-                    _, err = database.Exec("INSERT INTO " + dbName + ".posts (username, email, content) VALUES (?, ?, ?)", username, email, content)
+                    res, err := database.Exec(
+                        "insert into " + dbName + ".posts (username, email, content) values (?, ?, ?)", username, email, content,
+                    )
+
+                    if err != nil {
+                        fmt.Println(err)
+                    }
+
+                    newID, _ := res.LastInsertId()
+                    publishPostCreated(newID, username, email, content)
                 }
             }
         } else {
             if m, _ := regexp.MatchString(`^([\w\.\_]{2,10})@(\w{1,}).([a-z]{2,4})$`, email); !m {
                 errorEmail = "Не верный формат e-mail " + email
             } else {
-                res, err := database.Exec("INSERT INTO " + dbName + ".posts (username, email, content) VALUES (?, ?, ?)",
+                res, err := database.Exec("insert into " + dbName + ".posts (username, email, content) values (?, ?, ?)",
                 username, email, content)
                 errorEmail = ""
-                if (err != nil) {
+
+                if err != nil {
                     fmt.Println(err)
                 }
+
                 newID, _ := res.LastInsertId()
                 publishPostCreated(newID, username, email, content)
             }
@@ -209,10 +240,30 @@ func publishPostCreated(id int64, username, email, content string) {
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
 
-    _ = kafkaWriter.WriteMessages(ctx, kafka.Message{
+    if err := kafkaWriter.WriteMessages(ctx, kafka.Message{
         Key:   []byte(strconv.FormatInt(id, 10)),
         Value: body,
-    })
+    }); err != nil {
+        fmt.Println("kafka write error:", err)
+    }
+}
+
+func createKafkaWriter() *kafka.Writer {
+    brokers := os.Getenv("KAFKA_BROKERS")
+    kafkaTopic = os.Getenv("KAFKA_TOPIC")
+    if kafkaTopic == "" {
+        kafkaTopic = "posts.created"
+    }
+    if strings.TrimSpace(brokers) == "" {
+        return nil
+    }
+
+    return &kafka.Writer{
+        Addr:         kafka.TCP(strings.Split(brokers, ",")...),
+        Topic:        kafkaTopic,
+        Balancer:     &kafka.Hash{},
+        RequiredAcks: kafka.RequireAll,
+    }
 }
 
 func main() {
@@ -224,47 +275,32 @@ func main() {
 
 	username := os.Getenv("DB_USER")
 	password := os.Getenv("DB_PASS")
-	db_name := os.Getenv("DB_NAME")
-	db_host := os.Getenv("DB_HOST")
-	db_port := os.Getenv("DB_PORT")
+	dbName = os.Getenv("DB_NAME")
+	dbHost = os.Getenv("DB_HOST")
+	dbPort = os.Getenv("DB_PORT")
 
-    db, err := sql.Open("mysql", "" + username + ":" + password + "@tcp(" + db_host + ":" + db_port + ")/" + db_name + "")
+    db, err := sql.Open("mysql", "" + username + ":" + password + "@tcp(" + dbHost + ":" + dbPort + ")/" + dbName + "")
 
-    if (err != nil) {
+    if err != nil {
         fmt.Println(err)
     }
 
-    /*
-    * Set variable to global
-    */
     database = db
-    dbName = db_name
     defer db.Close()
     
-    brokers := os.Getenv("KAFKA_BROKERS")
-    kafkaTopic = os.Getenv("KAFKA_TOPIC")
-    if kafkaTopic == "" {
-        kafkaTopic = "posts.created"
-    }
-   if strings.TrimSpace(brokers) != "" {
-        kafkaWriter = &kafka.Writer{
-            Addr:         kafka.TCP(strings.Split(brokers, ",")...),
-            Topic:        kafkaTopic,
-            Balancer:     &kafka.Hash{},
-            RequiredAcks: kafka.RequireAll,
-        }
-        defer kafkaWriter.Close()
+    kafkaWriter = createKafkaWriter()
+    if kafkaWriter != nil {
+       defer kafkaWriter.Close()
     }
 
-	mux := mux.NewRouter()
-	router := mux.StrictSlash(true)
+	router := mux.NewRouter()
     router.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("assets/"))))
-    mux.HandleFunc("/", index)
-    mux.HandleFunc("/addPost", addPost)
-    mux.HandleFunc("/editPost", editPost)
-    mux.HandleFunc("/deletePost", deletePost)
-    mux.HandleFunc("/userData", userData)
+    router.HandleFunc("/", index)
+    router.HandleFunc("/add", add)
+    router.HandleFunc("/edit/{id:[0-9]+}", edit)
+    router.HandleFunc("/delete/{id:[0-9]+}", delete)
+    router.HandleFunc("/userData", userData)
     port := ":8089"
     fmt.Println("Listening on port ", port)
-    http.ListenAndServe(port, mux)
+    http.ListenAndServe(port, router)
 }

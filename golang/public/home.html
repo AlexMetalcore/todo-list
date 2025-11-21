@@ -28,8 +28,8 @@
                         <td>{{$value.Email}}</td>
                         <td>{{$value.Content}}</td>
                         <td>
-                            <a href="/editPost?id={{$value.Id}}">Редактировать</a> /
-                            <a href="/deletePost?id={{$value.Id}}">Удалить</a>
+                            <a href="/edit/{{$value.Id}}">Редактировать</a> /
+                            <a href="/delete/{{$value.Id}}">Удалить</a>
                         </td>
                     </tr>
                 {{end}}
